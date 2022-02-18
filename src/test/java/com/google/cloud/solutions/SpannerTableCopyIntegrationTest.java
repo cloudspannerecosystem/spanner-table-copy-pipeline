@@ -15,21 +15,14 @@
 package com.google.cloud.solutions;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.common.truth.Truth.assertWithMessage;
 import static org.junit.Assert.assertThrows;
 
 import com.google.cloud.Timestamp;
 import com.google.cloud.solutions.SpannerTableCopy.SpannerTableCopyOptions;
-import com.google.cloud.spanner.Database;
-import com.google.cloud.spanner.DatabaseClient;
-import com.google.cloud.spanner.InstanceConfig;
-import com.google.cloud.spanner.InstanceId;
-import com.google.cloud.spanner.InstanceInfo;
+import com.google.cloud.solutions.testing.SpannerEmulator;
 import com.google.cloud.spanner.KeySet;
 import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.ResultSet;
-import com.google.cloud.spanner.Spanner;
-import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.Struct;
 import com.google.common.collect.ImmutableList;
@@ -40,16 +33,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.beam.sdk.Pipeline.PipelineExecutionException;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.testing.TestPipeline;
 import org.junit.After;
-import org.junit.AfterClass;
 import org.junit.Before;
-import org.junit.BeforeClass;
+import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -63,10 +53,6 @@ import org.junit.runners.JUnit4;
  */
 @RunWith(JUnit4.class)
 public class SpannerTableCopyIntegrationTest {
-
-  private static Process emulatorProcess = null;
-  private static DatabaseClient dbClient = null;
-  private static Spanner spanner = null;
 
   // Use custom ports to avoid collision with other emulators.
   private static final int EMULATOR_PORT = 29010;
@@ -82,110 +68,40 @@ public class SpannerTableCopyIntegrationTest {
           1L, "Hello World",
           2L, "Goodbye World");
 
-  @BeforeClass
-  public static void startEmulator() throws IOException, InterruptedException, ExecutionException {
-    assertThat(emulatorProcess).isNull();
-    emulatorProcess =
-        new ProcessBuilder()
-            .inheritIO()
-            .command(
-                "gcloud",
-                "emulators",
-                "spanner",
-                "start",
-                "--host-port=" + EMULATOR_HOST,
-                "--rest-port=" + EMULATOR_REST_PORT)
-            .start();
-    // check for startup failure
-    if (emulatorProcess.waitFor(5, TimeUnit.SECONDS)) {
-      assertWithMessage("Emulator failed to start").fail();
-      emulatorProcess = null;
-    }
-    System.err.println("Spanner Emulator started");
-
-    spanner =
-        SpannerOptions.newBuilder()
-            .setEmulatorHost(EMULATOR_HOST)
-            .setProjectId("dummy-project-id")
-            .build()
-            .getService();
-    InstanceConfig config =
-        spanner.getInstanceAdminClient().listInstanceConfigs().iterateAll().iterator().next();
-    InstanceId instanceId = InstanceId.of(PROJECT_ID, INSTANCE_ID);
-    System.err.println("Creating instance");
-    spanner
-        .getInstanceAdminClient()
-        .createInstance(
-            InstanceInfo.newBuilder(instanceId)
-                .setInstanceConfigId(config.getId())
-                .setNodeCount(1)
-                .build())
-        .get();
-    System.err.println("Creating database");
-    Database db =
-        spanner
-            .getDatabaseAdminClient()
-            .createDatabase(
-                INSTANCE_ID,
-                DATABASE_ID,
-                ImmutableList.of(
-                    "CREATE TABLE source (key INT64, value STRING(MAX)) PRIMARY KEY(key)",
-                    "CREATE TABLE dest (key INT64, value STRING(MAX)) PRIMARY KEY(key)"))
-            .get();
-
-    dbClient = spanner.getDatabaseClient(db.getId());
-    System.err.println("Emulator ready");
-  }
-
-  @AfterClass
-  public static void endEmulator() throws InterruptedException, IOException {
-    spanner.close();
-    spanner = null;
-    dbClient = null;
-    if (emulatorProcess != null && emulatorProcess.isAlive()) {
-      System.err.println("Stopping Spanner Emulator");
-      emulatorProcess.destroy();
-      if (!emulatorProcess.waitFor(5, TimeUnit.SECONDS)) {
-        emulatorProcess.destroyForcibly();
-      }
-      if (!emulatorProcess.waitFor(5, TimeUnit.SECONDS)) {
-        assertWithMessage("Emulator could not be killed").fail();
-      }
-    }
-    // Cleanup any leftover emulator processes
-    System.err.println("Stopping Spanner Emulator subprocesses");
-    new ProcessBuilder()
-        .inheritIO()
-        .command(
-            "bash",
-            "-c",
-            "kill $(ps -xo pid,command | grep 'spanner_emulator.*"
-                + EMULATOR_PORT
-                + "' | cut -f1 \"-d \" )")
-        .start()
-        .waitFor();
-    emulatorProcess = null;
-    System.err.println("Emulator stopped");
-  }
+  @ClassRule
+  public static SpannerEmulator emulator =
+      SpannerEmulator.builder()
+          .projectId(PROJECT_ID)
+          .instanceId(INSTANCE_ID)
+          .databaseId(DATABASE_ID)
+          .emulatorPort(EMULATOR_PORT)
+          .emulatorRestPort(EMULATOR_REST_PORT)
+          .ddlStatements(
+              "CREATE TABLE source (key INT64, value STRING(MAX)) PRIMARY KEY(key)",
+              "CREATE TABLE dest (key INT64, value STRING(MAX)) PRIMARY KEY(key)")
+          .build();
 
   @Before
   public void setUpTestDb() {
-    dbClient.writeAtLeastOnce(
-        TEST_DATA.entrySet().stream()
-            .map(
-                (entry) ->
-                    Mutation.newInsertBuilder("source")
-                        .set("key")
-                        .to(entry.getKey())
-                        .set("value")
-                        .to(entry.getValue())
-                        .build())
-            .collect(Collectors.toList()));
+    emulator
+        .getDatabaseClient()
+        .writeAtLeastOnce(
+            TEST_DATA.entrySet().stream()
+                .map(
+                    (entry) ->
+                        Mutation.newInsertBuilder("source")
+                            .set("key")
+                            .to(entry.getKey())
+                            .set("value")
+                            .to(entry.getValue())
+                            .build())
+                .collect(Collectors.toList()));
   }
 
   @After
   public void tearDownTestDb() {
-    dbClient
+    emulator
+        .getDatabaseClient()
         .readWriteTransaction()
         .run(
             txn -> {
@@ -201,11 +117,11 @@ public class SpannerTableCopyIntegrationTest {
 
   private static final ImmutableList<String> COMMON_ARGS =
       ImmutableList.of(
-          "--sourceProjectId=" + PROJECT_ID, // BEAM 2.1.34-35 require PROJECT ID in SpannerIO
+          "--sourceProjectId=" + PROJECT_ID,
           "--sourceInstanceId=" + INSTANCE_ID,
           "--sourceDatabaseId=" + DATABASE_ID,
           "--sourceEmulatorHost=" + EMULATOR_HOST,
-          "--destinationProjectId=" + PROJECT_ID, // BEAM 2.1.34-35 require PROJECT ID in SpannerIO
+          "--destinationProjectId=" + PROJECT_ID,
           "--destinationInstanceId=" + INSTANCE_ID,
           "--destinationDatabaseId=" + DATABASE_ID,
           "--destinationEmulatorHost=" + EMULATOR_HOST);
@@ -290,7 +206,9 @@ public class SpannerTableCopyIntegrationTest {
     Thread.sleep(1000);
 
     // Delete all rows
-    dbClient.writeAtLeastOnce(ImmutableList.of(Mutation.delete("source", KeySet.all())));
+    emulator
+        .getDatabaseClient()
+        .writeAtLeastOnce(ImmutableList.of(Mutation.delete("source", KeySet.all())));
     // verify source is empty
     assertThat(readAllRowsFromTable("source")).isEmpty();
 
@@ -430,14 +348,16 @@ public class SpannerTableCopyIntegrationTest {
   @Test
   public void catchingFailuresExistingRow() throws IOException {
 
-    dbClient.writeAtLeastOnce(
-        ImmutableList.of(
-            Mutation.newInsertBuilder("dest")
-                .set("key")
-                .to(1)
-                .set("value")
-                .to("existing row")
-                .build()));
+    emulator
+        .getDatabaseClient()
+        .writeAtLeastOnce(
+            ImmutableList.of(
+                Mutation.newInsertBuilder("dest")
+                    .set("key")
+                    .to(1)
+                    .set("value")
+                    .to("existing row")
+                    .build()));
 
     ImmutableList<String> args =
         new ImmutableList.Builder<String>()
@@ -476,20 +396,22 @@ public class SpannerTableCopyIntegrationTest {
   @Test
   public void deleteFromDest() throws IOException {
 
-    dbClient.writeAtLeastOnce(
-        ImmutableList.of(
-            Mutation.newInsertBuilder("dest")
-                .set("key")
-                .to(1)
-                .set("value")
-                .to("existing row")
-                .build(),
-            Mutation.newInsertBuilder("dest")
-                .set("key")
-                .to(3)
-                .set("value")
-                .to("existing row3")
-                .build()));
+    emulator
+        .getDatabaseClient()
+        .writeAtLeastOnce(
+            ImmutableList.of(
+                Mutation.newInsertBuilder("dest")
+                    .set("key")
+                    .to(1)
+                    .set("value")
+                    .to("existing row")
+                    .build(),
+                Mutation.newInsertBuilder("dest")
+                    .set("key")
+                    .to(3)
+                    .set("value")
+                    .to("existing row3")
+                    .build()));
 
     ImmutableList<String> args =
         new ImmutableList.Builder<String>()
@@ -522,7 +444,10 @@ public class SpannerTableCopyIntegrationTest {
 
   private ImmutableMap<Long, String> readAllRowsFromTable(String table) {
     try (ResultSet resultSet =
-        dbClient.singleUse().read(table, KeySet.all(), ImmutableList.of("key", "value"))) {
+        emulator
+            .getDatabaseClient()
+            .singleUse()
+            .read(table, KeySet.all(), ImmutableList.of("key", "value"))) {
       ImmutableMap.Builder<Long, String> rb = new ImmutableMap.Builder<>();
       while (resultSet.next()) {
         Struct row = resultSet.getCurrentRowAsStruct();
