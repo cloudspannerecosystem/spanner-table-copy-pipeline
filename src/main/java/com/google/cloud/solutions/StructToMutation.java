@@ -75,117 +75,130 @@ class StructToMutation extends SimpleFunction<Struct, Mutation> {
       }
       ValueBinder<WriteBuilder> pendingValue = mutation.set(columnName);
 
-      Value columnValue = row.getValue(colNum);
-      switch (columnValue.getType().getCode()) {
-        case BOOL:
-          pendingValue.to(columnValue.getBool());
-          break;
-        case INT64:
-          pendingValue.to(columnValue.getInt64());
-          break;
-        case NUMERIC:
-          pendingValue.to(columnValue.getNumeric());
-          break;
-        case FLOAT64:
-          pendingValue.to(columnValue.getFloat64());
-          break;
-        case STRING:
-          pendingValue.to(columnValue.getString());
-          break;
-        case JSON:
-          pendingValue.to(columnValue.getJson());
-          break;
-        case BYTES:
-          pendingValue.to(columnValue.getBytes());
-          break;
-        case TIMESTAMP:
-          pendingValue.to(columnValue.getTimestamp());
-          break;
-        case DATE:
-          pendingValue.to(columnValue.getDate());
-          break;
-        case ARRAY:
-          switch (columnValue.getType().getArrayElementType().getCode()) {
-            case BOOL:
-              pendingValue.toBoolArray(columnValue.getBoolArray());
-              break;
-            case INT64:
-              pendingValue.toInt64Array(columnValue.getInt64Array());
-              break;
-            case NUMERIC:
-              pendingValue.toNumericArray(columnValue.getNumericArray());
-              break;
-            case FLOAT64:
-              pendingValue.toFloat64Array(columnValue.getFloat64Array());
-              break;
-            case STRING:
-              pendingValue.toStringArray(columnValue.getStringArray());
-              break;
-            case JSON:
-              pendingValue.toJsonArray(columnValue.getJsonArray());
-              break;
-            case BYTES:
-              pendingValue.toBytesArray(columnValue.getBytesArray());
-              break;
-            case TIMESTAMP:
-              pendingValue.toTimestampArray(columnValue.getTimestampArray());
-              break;
-            case DATE:
-              pendingValue.toDateArray(columnValue.getDateArray());
-              break;
-            default:
-              throw new IllegalArgumentException(
-                  "Unsupported array column value type in position: "
-                      + colNum
-                      + ": "
-                      + columnValue.getType().getArrayElementType().getCode().toString());
-          }
-          break;
-        default:
-          throw new IllegalArgumentException(
-              "Unsupported column type in position: "
-                  + colNum
-                  + ": "
-                  + columnValue.getType().getCode().toString());
+      Value columnValue = row.getValue(columnName);
+
+      if (columnValue.isNull()) {
+        pendingValue.to((String) null);
+      } else {
+
+        switch (columnValue.getType().getCode()) {
+          case BOOL:
+            pendingValue.to(columnValue.getBool());
+            break;
+          case INT64:
+            pendingValue.to(columnValue.getInt64());
+            break;
+          case NUMERIC:
+            pendingValue.to(columnValue.getNumeric());
+            break;
+          case FLOAT64:
+            pendingValue.to(columnValue.getFloat64());
+            break;
+          case STRING:
+            pendingValue.to(columnValue.getString());
+            break;
+          case JSON:
+            pendingValue.to(columnValue.getJson());
+            break;
+          case BYTES:
+            pendingValue.to(columnValue.getBytes());
+            break;
+          case TIMESTAMP:
+            pendingValue.to(columnValue.getTimestamp());
+            break;
+          case DATE:
+            pendingValue.to(columnValue.getDate());
+            break;
+          case ARRAY:
+            switch (columnValue.getType().getArrayElementType().getCode()) {
+              case BOOL:
+                pendingValue.toBoolArray(columnValue.getBoolArray());
+                break;
+              case INT64:
+                pendingValue.toInt64Array(columnValue.getInt64Array());
+                break;
+              case NUMERIC:
+                pendingValue.toNumericArray(columnValue.getNumericArray());
+                break;
+              case FLOAT64:
+                pendingValue.toFloat64Array(columnValue.getFloat64Array());
+                break;
+              case STRING:
+                pendingValue.toStringArray(columnValue.getStringArray());
+                break;
+              case JSON:
+                pendingValue.toJsonArray(columnValue.getJsonArray());
+                break;
+              case BYTES:
+                pendingValue.toBytesArray(columnValue.getBytesArray());
+                break;
+              case TIMESTAMP:
+                pendingValue.toTimestampArray(columnValue.getTimestampArray());
+                break;
+              case DATE:
+                pendingValue.toDateArray(columnValue.getDateArray());
+                break;
+              default:
+                throw new IllegalArgumentException(
+                    "Unsupported array column value type in position: "
+                        + colNum
+                        + ": "
+                        + columnValue.getType().getArrayElementType().getCode().toString());
+            }
+            break;
+          default:
+            throw new IllegalArgumentException(
+                "Unsupported column type in position: "
+                    + colNum
+                    + ": "
+                    + columnValue.getType().getCode().toString());
+        }
       }
     }
   }
 
   private Key buildKeyFromStruct(Struct row) {
+    List<StructField> cols = row.getType().getStructFields();
     Key.Builder keyBuilder = Key.newBuilder();
     for (int colNum = 0; colNum < row.getColumnCount(); colNum++) {
-      Value value = row.getValue(colNum);
-      switch (value.getType().getCode()) {
-        case BOOL:
-          keyBuilder.append(value.getBool());
-          break;
-        case INT64:
-          keyBuilder.append(value.getInt64());
-          break;
-        case NUMERIC:
-          keyBuilder.append(value.getNumeric());
-          break;
-        case FLOAT64:
-          keyBuilder.append(value.getFloat64());
-          break;
-        case STRING:
-          keyBuilder.append(value.getString());
-          break;
-        case BYTES:
-          keyBuilder.append(value.getBytes());
-          break;
-        case TIMESTAMP:
-          keyBuilder.append(value.getTimestamp());
-          break;
-        case DATE:
-          keyBuilder.append(value.getDate());
-          break;
-        default:
-          throw new IllegalArgumentException(
-              "Unsupported key column type in position: "
-                  + colNum
-                  + ": "
-                  + value.getType().getCode());
+      Value value = row.getValue(cols.get(colNum).getName());
+
+      if (value.isNull()) {
+        keyBuilder.append((String) null);
+      } else {
+
+        switch (value.getType().getCode()) {
+          case BOOL:
+            keyBuilder.append(value.getBool());
+            break;
+          case INT64:
+            keyBuilder.append(value.getInt64());
+            break;
+          case NUMERIC:
+            keyBuilder.append(value.getNumeric());
+            break;
+          case FLOAT64:
+            keyBuilder.append(value.getFloat64());
+            break;
+          case STRING:
+            keyBuilder.append(value.getString());
+            break;
+          case BYTES:
+            keyBuilder.append(value.getBytes());
+            break;
+          case TIMESTAMP:
+            keyBuilder.append(value.getTimestamp());
+            break;
+          case DATE:
+            keyBuilder.append(value.getDate());
+            break;
+          default:
+            throw new IllegalArgumentException(
+                "Unsupported key column type in position: "
+                    + colNum
+                    + ": "
+                    + value.getType().getCode());
+        }
       }
     }
     return keyBuilder.build();

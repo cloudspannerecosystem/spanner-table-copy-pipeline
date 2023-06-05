@@ -22,11 +22,11 @@ import com.google.cloud.solutions.SpannerTableCopy.SpannerTableCopyOptions;
 import com.google.cloud.solutions.testing.SpannerEmulator;
 import com.google.cloud.spanner.KeySet;
 import com.google.cloud.spanner.Mutation;
+import com.google.cloud.spanner.ReadContext;
 import com.google.cloud.spanner.ResultSet;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.Struct;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 import org.apache.beam.sdk.Pipeline.PipelineExecutionException;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.testing.TestPipeline;
+import org.apache.beam.sdk.values.KV;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.ClassRule;
@@ -49,7 +50,8 @@ import org.junit.runners.JUnit4;
 /**
  * This test requires the Cloud Spanner Emulator to be installed.
  *
- * <p>see https://cloud.google.com/spanner/docs/emulator#installing_and_running_the_emulator
+ * <p>see <a
+ * href="https://cloud.google.com/spanner/docs/emulator#installing_and_running_the_emulator">emulator documentation</a>
  */
 @RunWith(JUnit4.class)
 public class SpannerTableCopyIntegrationTest {
@@ -63,10 +65,11 @@ public class SpannerTableCopyIntegrationTest {
   public static final String INSTANCE_ID = "test";
   public static final String DATABASE_ID = "test";
 
-  private static final ImmutableMap<Long, String> TEST_DATA =
-      ImmutableMap.of(
-          1L, "Hello World",
-          2L, "Goodbye World");
+  private static final ImmutableList<KV<Long, String>> TEST_DATA =
+      ImmutableList.of(
+          KV.of(1L, "Hello World"),
+          KV.of(2L, "Goodbye World"),
+          KV.of(3L, null));
 
   @ClassRule
   public static SpannerEmulator emulator =
@@ -86,7 +89,7 @@ public class SpannerTableCopyIntegrationTest {
     emulator
         .getDatabaseClient()
         .writeAtLeastOnce(
-            TEST_DATA.entrySet().stream()
+            TEST_DATA.stream()
                 .map(
                     (entry) ->
                         Mutation.newInsertBuilder("source")
@@ -146,15 +149,15 @@ public class SpannerTableCopyIntegrationTest {
         .run()
         .waitUntilFinish();
 
-    assertThat(readAllRowsFromTable("dest")).containsExactlyEntriesIn(TEST_DATA);
+    assertThat(readAllRowsFromTable("dest")).containsExactlyElementsIn(TEST_DATA);
 
     assertThat(readLinesFromFiles("mutations"))
         .containsExactlyElementsIn(
-            TEST_DATA.entrySet().stream()
+            TEST_DATA.stream()
                 .map(
                     entry ->
                         String.format(
-                            "insert(dest{key=%d,value=%s})", entry.getKey(), entry.getValue()))
+                            "insert(dest{key=%d,value=%s})", entry.getKey(), nullToNULL(entry.getValue())))
                 .collect(Collectors.toList()));
 
     assertThat(readLinesFromFiles("failures")).isEmpty();
@@ -185,14 +188,21 @@ public class SpannerTableCopyIntegrationTest {
 
     assertThat(readLinesFromFiles("mutations"))
         .containsExactlyElementsIn(
-            TEST_DATA.entrySet().stream()
+            TEST_DATA.stream()
                 .map(
                     entry ->
                         String.format(
-                            "insert(dest{key=%d,value=%s})", entry.getKey(), entry.getValue()))
+                            "insert(dest{key=%d,value=%s})", entry.getKey(), nullToNULL(entry.getValue())))
                 .collect(Collectors.toList()));
 
     assertThat(readLinesFromFiles("failures")).isEmpty();
+  }
+
+  /**
+   * converts null values to NULL string
+   */
+  private static String nullToNULL(String s) {
+    return s == null ? "NULL" : s;
   }
 
   @Test
@@ -231,15 +241,15 @@ public class SpannerTableCopyIntegrationTest {
         .run()
         .waitUntilFinish();
 
-    assertThat(readAllRowsFromTable("dest")).containsExactlyEntriesIn(TEST_DATA);
+    assertThat(readAllRowsFromTable("dest")).containsExactlyElementsIn(TEST_DATA);
 
     assertThat(readLinesFromFiles("mutations"))
         .containsExactlyElementsIn(
-            TEST_DATA.entrySet().stream()
+            TEST_DATA.stream()
                 .map(
                     entry ->
                         String.format(
-                            "replace(dest{key=%d,value=%s})", entry.getKey(), entry.getValue()))
+                            "replace(dest{key=%d,value=%s})", entry.getKey(), nullToNULL(entry.getValue())))
                 .collect(Collectors.toList()));
 
     assertThat(readLinesFromFiles("failures")).isEmpty();
@@ -268,21 +278,20 @@ public class SpannerTableCopyIntegrationTest {
         .waitUntilFinish();
 
     assertThat(readAllRowsFromTable("dest"))
-        .containsExactlyEntriesIn(
-            TEST_DATA.entrySet().stream()
-                .collect(
-                    Collectors.toMap(
-                        (e) -> (e.getKey() * 100L),
-                        (e) -> e.getValue().replace("World", "Jupiter"))));
+        .containsExactlyElementsIn(
+            TEST_DATA.stream()
+                .map(e->KV.of((e.getKey() * 100L),
+                    e.getValue()==null ? null : e.getValue().replace("World", "Jupiter")))
+                .collect(Collectors.toList()));
 
     assertThat(readLinesFromFiles("mutations"))
         .containsExactlyElementsIn(
-            TEST_DATA.entrySet().stream()
+            TEST_DATA.stream()
                 .map(
                     entry ->
                         String.format(
                             "insert(dest{key=%d,value=%s})",
-                            entry.getKey() * 100, entry.getValue().replace("World", "Jupiter")))
+                            entry.getKey() * 100, entry.getValue()==null ? "NULL" : entry.getValue().replace("World", "Jupiter")))
                 .collect(Collectors.toList()));
     assertThat(readLinesFromFiles("failures")).isEmpty();
   }
@@ -311,8 +320,8 @@ public class SpannerTableCopyIntegrationTest {
     assertThat(readAllRowsFromTable("dest")).isEmpty();
 
     final List<String> expectedMutations =
-        TEST_DATA.keySet().stream()
-            .map(k -> String.format("insert(dest{notkey=%d,notvalue=hello})", k * 15))
+        TEST_DATA.stream()
+            .map(e -> String.format("insert(dest{notkey=%d,notvalue=hello})", e.getKey() * 15))
             .collect(Collectors.toList());
     assertThat(readLinesFromFiles("mutations")).containsExactlyElementsIn(expectedMutations);
     assertThat(readLinesFromFiles("failures")).containsExactlyElementsIn(expectedMutations);
@@ -378,15 +387,15 @@ public class SpannerTableCopyIntegrationTest {
         .waitUntilFinish();
 
     assertThat(readAllRowsFromTable("dest"))
-        .containsExactly(1L, "existing row", 2L, "Goodbye World");
+        .containsExactly(KV.of(1L, "existing row"), KV.of(2L, "Goodbye World"), KV.of(3L, null));
 
     assertThat(readLinesFromFiles("mutations"))
         .containsExactlyElementsIn(
-            TEST_DATA.entrySet().stream()
+            TEST_DATA.stream()
                 .map(
                     entry ->
                         String.format(
-                            "insert(dest{key=%d,value=%s})", entry.getKey(), entry.getValue()))
+                            "insert(dest{key=%d,value=%s})", entry.getKey(), nullToNULL(entry.getValue())))
                 .collect(Collectors.toList()));
 
     assertThat(readLinesFromFiles("failures"))
@@ -404,13 +413,13 @@ public class SpannerTableCopyIntegrationTest {
                     .set("key")
                     .to(1)
                     .set("value")
-                    .to("existing row")
+                    .to("existing row - will delete")
                     .build(),
                 Mutation.newInsertBuilder("dest")
                     .set("key")
-                    .to(3)
+                    .to(4)
                     .set("value")
-                    .to("existing row3")
+                    .to("existing row - wont delete")
                     .build()));
 
     ImmutableList<String> args =
@@ -431,29 +440,27 @@ public class SpannerTableCopyIntegrationTest {
         .run()
         .waitUntilFinish();
 
-    assertThat(readAllRowsFromTable("dest")).containsExactly(3L, "existing row3");
+    assertThat(readAllRowsFromTable("dest")).containsExactly(KV.of(4L, "existing row - wont delete"));
 
     assertThat(readLinesFromFiles("mutations"))
         .containsExactlyElementsIn(
-            TEST_DATA.keySet().stream()
-                .map(k -> String.format("delete(dest{[%d]})", k))
+            TEST_DATA.stream()
+                .map(e -> String.format("delete(dest{[%d]})", e.getKey()))
                 .collect(Collectors.toList()));
 
     assertThat(readLinesFromFiles("failures")).isEmpty();
   }
 
-  private ImmutableMap<Long, String> readAllRowsFromTable(String table) {
-    try (ResultSet resultSet =
-        emulator
-            .getDatabaseClient()
-            .singleUse()
-            .read(table, KeySet.all(), ImmutableList.of("key", "value"))) {
-      ImmutableMap.Builder<Long, String> rb = new ImmutableMap.Builder<>();
-      while (resultSet.next()) {
-        Struct row = resultSet.getCurrentRowAsStruct();
-        rb.put(row.getLong("key"), row.getString("value"));
+  private ImmutableList<KV<Long, String>> readAllRowsFromTable(String table) {
+    try (ReadContext r = emulator.getDatabaseClient().singleUse()) {
+      try (ResultSet resultSet = r.read(table, KeySet.all(), ImmutableList.of("key", "value"))) {
+        ImmutableList.Builder<KV<Long, String>> rb = new ImmutableList.Builder<>();
+        while (resultSet.next()) {
+          Struct row = resultSet.getCurrentRowAsStruct();
+          rb.add(KV.of(row.getLong("key"), row.isNull("value") ? null : row.getString("value")));
+        }
+        return rb.build();
       }
-      return rb.build();
     }
   }
 
