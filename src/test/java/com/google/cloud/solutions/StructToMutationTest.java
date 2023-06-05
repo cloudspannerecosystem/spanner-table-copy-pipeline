@@ -24,8 +24,9 @@ import com.google.cloud.spanner.Mutation.Op;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.Type.Code;
 import com.google.cloud.spanner.Value;
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -58,7 +59,10 @@ public class StructToMutationTest {
         .set("timestampCol")
         .to(Timestamp.parseTimestamp("2022-02-14T16:32:00Z"))
         .set("dateCol")
-        .to(Date.parseDate("2022-03-30"));
+        .to(Date.parseDate("2022-03-30"))
+        .set("nullCol")
+        .to((Boolean) null);
+
     return structBuilder;
   }
 
@@ -131,6 +135,11 @@ public class StructToMutationTest {
     colName = "dateCol";
     assertThat(colValueMap.get(colName).getType().getCode()).isEqualTo(Code.DATE);
     assertThat(colValueMap.get(colName).getDate()).isEqualTo(s.getDate(colName));
+
+    colName = "nullCol";
+    // null columns use String type as that is the most compatible...
+    assertThat(colValueMap.get(colName).getType().getCode()).isEqualTo(Code.STRING);
+    assertThat(colValueMap.get(colName).isNull());
 
     colName = "booleanArrayCol";
     assertThat(colValueMap.get(colName).getType().getArrayElementType().getCode())
@@ -269,10 +278,16 @@ public class StructToMutationTest {
 
     assertThat(m.getOperation()).isEqualTo(Op.DELETE);
     assertThat(m.getTable()).isEqualTo("testTable5");
-    List<Object> keyParts =
-        ImmutableList.copyOf(m.getKeySet().getKeys().iterator().next().getParts());
 
-    assertThat(keyParts).hasSize(9);
+    // should have only one key.
+    assertThat(Iterables.size(m.getKeySet().getKeys())).isEqualTo(1);
+
+    List<Object> keyParts = new ArrayList<>();
+    Iterables.addAll(keyParts, m.getKeySet().getKeys().iterator().next().getParts());
+
+    // check num elements.
+    assertThat(keyParts.size()).isEqualTo(10);
+
     // booleanCol
     assertThat(keyParts.get(0)).isEqualTo(Boolean.TRUE);
     // int64Col
@@ -291,6 +306,8 @@ public class StructToMutationTest {
     assertThat(keyParts.get(7)).isEqualTo(Timestamp.parseTimestamp("2022-02-14T16:32:00Z"));
     // dateCol
     assertThat(keyParts.get(8)).isEqualTo(Date.parseDate("2022-03-30"));
+    // null value
+    assertThat(keyParts.get(9)).isNull();
   }
 
   @Test
