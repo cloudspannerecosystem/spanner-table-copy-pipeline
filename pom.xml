@@ -33,7 +33,7 @@
     <hamcrest.version>2.1</hamcrest.version>
     <jackson.version>2.13.0</jackson.version>
     <junit.version>4.13.2</junit.version>
-    <maven-compiler-plugin.version>3.7.0</maven-compiler-plugin.version>
+    <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
     <maven-exec-plugin.version>1.6.0</maven-exec-plugin.version>
     <maven-jar-plugin.version>3.0.2</maven-jar-plugin.version>
     <slf4j.version>2.0.5</slf4j.version>
