@@ -27,6 +27,11 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: maven
+    - name: 'Set up Cloud SDK'
+      uses: 'google-github-actions/setup-gcloud@v2'
+      with:
+        version: '>= 363.0.0'
+        install_components: 'alpha,cloud-spanner-emulator'
     - name: Build with Maven
       run: mvn -B package --file pom.xml
 
